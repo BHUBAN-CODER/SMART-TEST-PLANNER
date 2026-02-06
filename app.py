@@ -2,15 +2,20 @@ import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 from io import BytesIO
+import io
 
 # =========================================================
 # APP CONFIG
 # =========================================================
-st.set_page_config(page_title="Smart Test Planner", layout="wide")
+st.set_page_config(
+    page_title="Smart Test Planner",
+    layout="wide"
+)
+
 st.title("📘 Smart Test Planner")
 
 # =========================================================
-# IMPORTANT RULE DISPLAY (ADDED)
+# IMPORTANT RULE DISPLAY
 # =========================================================
 st.warning(
     "⚠️ IMPORTANT RULE\n\n"
@@ -21,21 +26,22 @@ st.warning(
 )
 
 # =========================================================
-# TEMPLATE
+# TEMPLATE DOWNLOAD
 # =========================================================
 def generate_template():
     return pd.DataFrame(
         columns=["Class"] + [f"Subject {i}" for i in range(1, 8)]
     )
 
-buf = BytesIO()
-generate_template().to_excel(buf, index=False, engine="openpyxl")
-buf.seek(0)
+template_buffer = BytesIO()
+generate_template().to_excel(template_buffer, index=False, engine="openpyxl")
+template_buffer.seek(0)
 
 st.download_button(
     "⬇️ Download Excel Template",
-    data=buf,
-    file_name="smart_test_template.xlsx"
+    data=template_buffer,
+    file_name="smart_test_template.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
 
 # =========================================================
@@ -48,7 +54,7 @@ def is_blocked_day(d, holidays):
     return d.weekday() == 6 or is_second_saturday(d) or d in holidays
 
 # =========================================================
-# CORE SCHEDULER
+# CORE SCHEDULER (UNCHANGED LOGIC)
 # =========================================================
 def generate_schedule(class_subjects, start_date, holidays):
 
@@ -102,16 +108,14 @@ def generate_schedule(class_subjects, start_date, holidays):
                 i += 1
                 continue
 
-            # ---------------- RULE C (last 2 non-dash) ----------------
+            # RULE: last 2 non-dash subjects
             recent = []
             for s in reversed(subjects_today):
                 if s != "-":
                     recent.append(s)
                 if len(recent) == 2:
                     break
-            # ----------------------------------------------------------
 
-            # 🔒 PRIORITY ENFORCEMENT FOR 11/12
             if cls in group_of:
                 first_subject = remaining[cls][0]
                 if first_subject in recent:
@@ -128,7 +132,6 @@ def generate_schedule(class_subjects, start_date, holidays):
                 if candidate in recent:
                     continue
 
-                # GROUP HANDLING
                 if cls in group_of:
                     grp = group_of[cls]
                     members = class_groups[grp]
@@ -149,7 +152,6 @@ def generate_schedule(class_subjects, start_date, holidays):
                         assigned = True
                         break
 
-                # NORMAL CLASS
                 row[cls] = candidate
                 remaining[cls].remove(candidate)
                 subjects_today.append(candidate)
@@ -177,55 +179,72 @@ def generate_schedule(class_subjects, start_date, holidays):
     return pd.DataFrame(schedule)
 
 # =========================================================
-# INPUT
+# INPUT (MOBILE SAFE)
 # =========================================================
-uploaded_file = st.file_uploader("Upload filled template", type=["xlsx"])
-start_date = st.date_input("Exam start date", value=date.today())
+uploaded_file = st.file_uploader(
+    "📤 Upload filled Excel template",
+    type=["xlsx"],
+    accept_multiple_files=False
+)
+
+start_date = st.date_input(
+    "📅 Exam start date",
+    value=date.today()
+)
 
 holiday_dates = st.multiselect(
-    "Holidays",
+    "📌 Holidays (optional)",
     options=[start_date + timedelta(days=i) for i in range(180)],
     format_func=lambda d: d.strftime("%d-%m-%Y")
 )
 
 # =========================================================
-# RUN
+# RUN (MOBILE SAFE FILE HANDLING)
 # =========================================================
-if st.button("📅 Generate Date Sheet") and uploaded_file is not None:
+if st.button("📅 Generate Date Sheet"):
 
-    df = pd.read_excel(uploaded_file)
-
-    class_subjects = {}
-    for _, r in df.iterrows():
-        cls = str(r["Class"]).strip().lower()
-        subs = [str(s).strip() for s in r[1:] if pd.notna(s)]
-        class_subjects[cls] = subs
-
-    result = generate_schedule(
-        class_subjects,
-        start_date,
-        set(holiday_dates)
-    )
-
-    if result.empty:
-        st.error("❌ No valid schedule possible with given rules.")
+    if uploaded_file is None:
+        st.error("Please upload the filled Excel template first.")
     else:
-        st.success("✅ Date Sheet Generated")
+        try:
+            file_bytes = uploaded_file.read()
+            df = pd.read_excel(io.BytesIO(file_bytes))
+        except Exception as e:
+            st.error("Failed to read the Excel file. Please re-upload.")
+            st.stop()
 
-        st.info(
-            "ℹ️ This date sheet strictly follows the rule that "
-            "NO three consecutive classes have the same exam on the same day.\n\n"
-            "Any further changes must be done manually."
+        class_subjects = {}
+        for _, r in df.iterrows():
+            cls = str(r["Class"]).strip().lower()
+            subs = [str(s).strip() for s in r[1:] if pd.notna(s)]
+            class_subjects[cls] = subs
+
+        result = generate_schedule(
+            class_subjects,
+            start_date,
+            set(holiday_dates)
         )
 
-        st.dataframe(result, use_container_width=True)
+        if result.empty:
+            st.error("❌ No valid schedule possible with given rules.")
+        else:
+            st.success("✅ Date Sheet Generated Successfully")
 
-        out = BytesIO()
-        result.to_excel(out, index=False, engine="openpyxl")
-        out.seek(0)
+            st.info(
+                "ℹ️ The generated date sheet strictly follows the rule:\n"
+                "NO three consecutive classes have the same exam on the same day."
+            )
 
-        st.download_button(
-            "⬇️ Download Final Date Sheet",
-            data=out,
-            file_name="final_datesheet.xlsx"
-        )
+            st.dataframe(result, use_container_width=True)
+
+            output = BytesIO()
+            result.to_excel(output, index=False, engine="openpyxl")
+            output.seek(0)
+
+            st.download_button(
+                "⬇️ Download Final Date Sheet",
+                data=output,
+                file_name="final_datesheet.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
