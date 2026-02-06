@@ -10,7 +10,7 @@ st.set_page_config(page_title="Smart Test Planner", layout="wide")
 st.title("📘 Smart Test Planner")
 
 # =========================================================
-# IMPORTANT RULE DISPLAY (ADDED)
+# IMPORTANT RULE DISPLAY
 # =========================================================
 st.warning(
     "⚠️ IMPORTANT RULE\n\n"
@@ -54,9 +54,10 @@ def generate_schedule(class_subjects, start_date, holidays):
 
     classes = list(class_subjects.keys())
 
+    # ✅ CORRECT GROUP DEFINITIONS
     class_groups = {
-        "11": ["11 science", "11 commerce"],
-        "12": ["12 science", "12 commerce"]
+        "11": ["11 science", "11 commerce", "11 arts"],
+        "12": ["12 science", "12 commerce", "12 arts"]
     }
 
     group_of = {}
@@ -84,6 +85,7 @@ def generate_schedule(class_subjects, start_date, holidays):
 
         subjects_today = []
         something_done = False
+        used_today = set()
 
         i = 0
         while i < len(classes):
@@ -102,57 +104,60 @@ def generate_schedule(class_subjects, start_date, holidays):
                 i += 1
                 continue
 
-            # ---------------- RULE C (last 2 non-dash) ----------------
+            # ---- NO THREE CONSECUTIVE RULE ----
             recent = []
             for s in reversed(subjects_today):
                 if s != "-":
                     recent.append(s)
                 if len(recent) == 2:
                     break
-            # ----------------------------------------------------------
 
-            # 🔒 PRIORITY ENFORCEMENT FOR 11/12
+            # ========= GROUP ENFORCEMENT (FIX) =========
             if cls in group_of:
-                first_subject = remaining[cls][0]
-                if first_subject in recent:
-                    row[cls] = "-"
-                    subjects_today.append("-")
-                    i += 1
+                grp = group_of[cls]
+                members = class_groups[grp]
+
+                # Find common subjects across ALL group members
+                common_subjects = set(remaining[members[0]])
+                for m in members[1:]:
+                    common_subjects &= set(remaining.get(m, []))
+
+                assigned = False
+                for candidate in common_subjects:
+                    if candidate in recent or candidate in used_today:
+                        continue
+
+                    # Assign to ALL members
+                    for m in members:
+                        row[m] = candidate
+                        remaining[m].remove(candidate)
+                        subjects_today.append(candidate)
+                        if not remaining[m]:
+                            finished.add(m)
+
+                    used_today.add(candidate)
                     something_done = True
-                    continue
+                    assigned = True
+                    i += len(members)
+                    break
 
+                if not assigned:
+                    for m in members:
+                        row[m] = "-"
+                        subjects_today.append("-")
+                    i += len(members)
+                continue
+
+            # ========= NORMAL CLASS =========
             assigned = False
-
             for candidate in list(remaining[cls]):
-
-                if candidate in recent:
+                if candidate in recent or candidate in used_today:
                     continue
 
-                # GROUP HANDLING
-                if cls in group_of:
-                    grp = group_of[cls]
-                    members = class_groups[grp]
-
-                    if all(
-                        m in remaining and candidate in remaining[m]
-                        for m in members
-                    ):
-                        for m in members:
-                            row[m] = candidate
-                            remaining[m].remove(candidate)
-                            subjects_today.append(candidate)
-                            if not remaining[m]:
-                                finished.add(m)
-
-                        i += len(members)
-                        something_done = True
-                        assigned = True
-                        break
-
-                # NORMAL CLASS
                 row[cls] = candidate
                 remaining[cls].remove(candidate)
                 subjects_today.append(candidate)
+                used_today.add(candidate)
                 something_done = True
 
                 if not remaining[cls]:
@@ -211,13 +216,6 @@ if st.button("📅 Generate Date Sheet") and uploaded_file is not None:
         st.error("❌ No valid schedule possible with given rules.")
     else:
         st.success("✅ Date Sheet Generated")
-
-        st.info(
-            "ℹ️ This date sheet strictly follows the rule that "
-            "NO three consecutive classes have the same exam on the same day.\n\n"
-            "Any further changes must be done manually."
-        )
-
         st.dataframe(result, use_container_width=True)
 
         out = BytesIO()
