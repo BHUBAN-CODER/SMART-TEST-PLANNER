@@ -126,7 +126,7 @@ if "table" not in st.session_state:
         "Subject 4": ["sanskrit","sanskrit","sanskrit","science","science","physics","business s","geography","physics","business s","geography"],
         "Subject 5": ["science","science","science","ai","ai","chem","economics","political sc","chem","economics","political sc"],
         "Subject 6": ["ai","ai","ai","sst","sst","bio/cs","accountancy","economics","bio/cs","accountancy","economics"]
-    }
+    })
 
 # =========================================================
 # SUBJECT COLUMN CONTROL
