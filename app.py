@@ -10,20 +10,23 @@ st.set_page_config(page_title="Smart Test Planner", layout="wide")
 st.title("📘 Smart Test Planner")
 
 # =========================================================
-# IMPORTANT RULE DISPLAY
+# IMPORTANT RULE DISPLAY (ADDED)
 # =========================================================
 st.warning(
     "⚠️ IMPORTANT RULE\n\n"
-    "• NO three consecutive classes will have the same exam on the same day.\n"
-    "• Class 11 and Class 12 are treated as SEPARATE groups.\n"
-    "• Subjects may sync partially within a group (e.g. Arts + Commerce).\n"
+    "The date sheet is generated STRICTLY based on the rule:\n"
+    "NO three consecutive classes will have the same exam on the same day.\n\n"
+    "If you want to change or relax this rule, please do it manually "
+    "after downloading the final date sheet."
 )
 
 # =========================================================
 # TEMPLATE
 # =========================================================
 def generate_template():
-    return pd.DataFrame(columns=["Class"] + [f"Subject {i}" for i in range(1, 8)])
+    return pd.DataFrame(
+        columns=["Class"] + [f"Subject {i}" for i in range(1, 8)]
+    )
 
 buf = BytesIO()
 generate_template().to_excel(buf, index=False, engine="openpyxl")
@@ -45,18 +48,21 @@ def is_blocked_day(d, holidays):
     return d.weekday() == 6 or is_second_saturday(d) or d in holidays
 
 # =========================================================
-# CORE SCHEDULER (FIXED)
+# CORE SCHEDULER
 # =========================================================
 def generate_schedule(class_subjects, start_date, holidays):
 
     classes = list(class_subjects.keys())
 
-    # Separate academic groups
-    groups = {
-        "11": [c for c in classes if c.startswith("11")],
-        "12": [c for c in classes if c.startswith("12")],
-        "other": [c for c in classes if not c.startswith("11") and not c.startswith("12")]
+    class_groups = {
+        "11": ["11 science", "11 commerce"],
+        "12": ["12 science", "12 commerce"]
     }
+
+    group_of = {}
+    for g, members in class_groups.items():
+        for m in members:
+            group_of[m] = g
 
     remaining = {c: list(class_subjects[c]) for c in classes}
     finished = set()
@@ -79,48 +85,87 @@ def generate_schedule(class_subjects, start_date, holidays):
         subjects_today = []
         something_done = False
 
-        for grp_classes in groups.values():
+        i = 0
+        while i < len(classes):
+            cls = classes[i]
 
-            # collect all subjects remaining in this group
-            subject_pool = {}
-            for cls in grp_classes:
-                if cls in finished:
-                    continue
-                for sub in remaining.get(cls, []):
-                    subject_pool.setdefault(sub, []).append(cls)
+            if cls in finished:
+                row[cls] = "-"
+                subjects_today.append("-")
+                i += 1
+                continue
 
-            # try each subject
-            for subject, cls_list in subject_pool.items():
+            if not remaining.get(cls):
+                row[cls] = "-"
+                finished.add(cls)
+                subjects_today.append("-")
+                i += 1
+                continue
 
-                # avoid 3 consecutive same subject
-                recent = [s for s in subjects_today if s != "-"][-2:]
-                if subject in recent:
-                    continue
+            # ---------------- RULE C (last 2 non-dash) ----------------
+            recent = []
+            for s in reversed(subjects_today):
+                if s != "-":
+                    recent.append(s)
+                if len(recent) == 2:
+                    break
+            # ----------------------------------------------------------
 
-                # assign subject only to classes that have it
-                for cls in grp_classes:
-                    if cls in finished:
-                        row[cls] = "-"
-                    elif cls in cls_list:
-                        row[cls] = subject
-                        remaining[cls].remove(subject)
-                        if not remaining[cls]:
-                            finished.add(cls)
-                    else:
-                        row[cls] = "-"
-
-                subjects_today.extend(
-                    [subject if cls in cls_list else "-" for cls in grp_classes]
-                )
-
-                something_done = True
-                break  # only one subject per group per day
-
-            else:
-                # nothing assigned in this group
-                for cls in grp_classes:
-                    row.setdefault(cls, "-")
+            # 🔒 PRIORITY ENFORCEMENT FOR 11/12
+            if cls in group_of:
+                first_subject = remaining[cls][0]
+                if first_subject in recent:
+                    row[cls] = "-"
                     subjects_today.append("-")
+                    i += 1
+                    something_done = True
+                    continue
+
+            assigned = False
+
+            for candidate in list(remaining[cls]):
+
+                if candidate in recent:
+                    continue
+
+                # GROUP HANDLING
+                if cls in group_of:
+                    grp = group_of[cls]
+                    members = class_groups[grp]
+
+                    if all(
+                        m in remaining and candidate in remaining[m]
+                        for m in members
+                    ):
+                        for m in members:
+                            row[m] = candidate
+                            remaining[m].remove(candidate)
+                            subjects_today.append(candidate)
+                            if not remaining[m]:
+                                finished.add(m)
+
+                        i += len(members)
+                        something_done = True
+                        assigned = True
+                        break
+
+                # NORMAL CLASS
+                row[cls] = candidate
+                remaining[cls].remove(candidate)
+                subjects_today.append(candidate)
+                something_done = True
+
+                if not remaining[cls]:
+                    finished.add(cls)
+
+                i += 1
+                assigned = True
+                break
+
+            if not assigned:
+                row[cls] = "-"
+                subjects_today.append("-")
+                i += 1
 
         if not something_done:
             break
@@ -129,7 +174,7 @@ def generate_schedule(class_subjects, start_date, holidays):
         current_date += timedelta(days=1)
         used_days += 1
 
-    return pd.DataFrame(schedule).fillna("-")
+    return pd.DataFrame(schedule)
 
 # =========================================================
 # INPUT
@@ -167,6 +212,12 @@ if st.button("📅 Generate Date Sheet") and uploaded_file is not None:
     else:
         st.success("✅ Date Sheet Generated")
 
+        st.info(
+            "ℹ️ This date sheet strictly follows the rule that "
+            "NO three consecutive classes have the same exam on the same day.\n\n"
+            "Any further changes must be done manually."
+        )
+
         st.dataframe(result, use_container_width=True)
 
         out = BytesIO()
@@ -178,4 +229,3 @@ if st.button("📅 Generate Date Sheet") and uploaded_file is not None:
             data=out,
             file_name="final_datesheet.xlsx"
         )
-
