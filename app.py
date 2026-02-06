@@ -15,7 +15,7 @@ st.title("📘 Smart Test Planner")
 st.warning(
     "⚠️ IMPORTANT RULE\n\n"
     "The date sheet is generated STRICTLY based on the rule:\n"
-    "NO three consecutive classes will have the same exam on the same day.\n\n"
+    "NO consecutive classes will have the same exam on the same day.\n\n"
     "If you want to change or relax this rule, please do it manually "
     "after downloading the final date sheet."
 )
@@ -214,7 +214,7 @@ if st.button("📅 Generate Date Sheet") and uploaded_file is not None:
 
         st.info(
             "ℹ️ This date sheet strictly follows the rule that "
-            "NO three consecutive classes have the same exam on the same day.\n\n"
+            "NO consecutive classes have the same exam on the same day.\n\n"
             "Any further changes must be done manually."
         )
 
