@@ -1,17 +1,12 @@
-import streamlit as st
+  import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 from io import BytesIO
-import io
 
 # =========================================================
 # APP CONFIG
 # =========================================================
-st.set_page_config(
-    page_title="Smart Test Planner",
-    layout="wide"
-)
-
+st.set_page_config(page_title="Smart Test Planner", layout="wide")
 st.title("📘 Smart Test Planner")
 
 # =========================================================
@@ -26,23 +21,55 @@ st.warning(
 )
 
 # =========================================================
-# TEMPLATE DOWNLOAD
+# EXCEL-LIKE TEMPLATE (WITH EXAMPLE DATA)
 # =========================================================
-def generate_template():
-    return pd.DataFrame(
-        columns=["Class"] + [f"Subject {i}" for i in range(1, 8)]
-    )
+def example_template():
+    return pd.DataFrame([
+        ["6", "English", "Maths", "Science", "SST", "Hindi", "", ""],
+        ["7", "English", "Maths", "Science", "SST", "Hindi", "", ""],
+        ["8", "English", "Maths", "Science", "SST", "Hindi", "", ""],
+        ["11 science", "English", "Maths", "Physics", "Chemistry", "CS", "", ""],
+        ["11 commerce", "English", "Maths", "Economics", "BST", "Accounts", "", ""],
+    ], columns=["Class"] + [f"Subject {i}" for i in range(1, 8)])
 
-template_buffer = BytesIO()
-generate_template().to_excel(template_buffer, index=False, engine="openpyxl")
-template_buffer.seek(0)
+# =========================================================
+# AUTO-SAVE SESSION STATE
+# =========================================================
+if "input_table" not in st.session_state:
+    st.session_state.input_table = example_template()
 
-st.download_button(
-    "⬇️ Download Excel Template",
-    data=template_buffer,
-    file_name="smart_test_template.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+# =========================================================
+# TABLE CONTROLS
+# =========================================================
+st.subheader("📝 Enter Class & Subjects (Excel-like Editor)")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    if st.button("➕ Add Row"):
+        st.session_state.input_table.loc[len(st.session_state.input_table)] = [""] * len(
+            st.session_state.input_table.columns
+        )
+
+with col2:
+    if st.button("➖ Remove Last Row"):
+        if len(st.session_state.input_table) > 1:
+            st.session_state.input_table = st.session_state.input_table.iloc[:-1]
+
+with col3:
+    if st.button("🧹 Clear All"):
+        st.session_state.input_table = example_template()
+
+# =========================================================
+# EDITABLE TABLE (AUTO-SAVED)
+# =========================================================
+edited_df = st.data_editor(
+    st.session_state.input_table,
+    num_rows="dynamic",
+    use_container_width=True
 )
+
+st.session_state.input_table = edited_df
 
 # =========================================================
 # DATE HELPERS
@@ -90,8 +117,8 @@ def generate_schedule(class_subjects, start_date, holidays):
 
         subjects_today = []
         something_done = False
-
         i = 0
+
         while i < len(classes):
             cls = classes[i]
 
@@ -108,7 +135,6 @@ def generate_schedule(class_subjects, start_date, holidays):
                 i += 1
                 continue
 
-            # RULE: last 2 non-dash subjects
             recent = []
             for s in reversed(subjects_today):
                 if s != "-":
@@ -116,52 +142,42 @@ def generate_schedule(class_subjects, start_date, holidays):
                 if len(recent) == 2:
                     break
 
-            if cls in group_of:
-                first_subject = remaining[cls][0]
-                if first_subject in recent:
-                    row[cls] = "-"
-                    subjects_today.append("-")
-                    i += 1
-                    something_done = True
-                    continue
+            if cls in group_of and remaining[cls][0] in recent:
+                row[cls] = "-"
+                subjects_today.append("-")
+                i += 1
+                something_done = True
+                continue
 
             assigned = False
 
             for candidate in list(remaining[cls]):
-
                 if candidate in recent:
                     continue
 
                 if cls in group_of:
                     grp = group_of[cls]
                     members = class_groups[grp]
-
-                    if all(
-                        m in remaining and candidate in remaining[m]
-                        for m in members
-                    ):
+                    if all(m in remaining and candidate in remaining[m] for m in members):
                         for m in members:
                             row[m] = candidate
                             remaining[m].remove(candidate)
                             subjects_today.append(candidate)
                             if not remaining[m]:
                                 finished.add(m)
-
                         i += len(members)
-                        something_done = True
                         assigned = True
+                        something_done = True
                         break
 
                 row[cls] = candidate
                 remaining[cls].remove(candidate)
                 subjects_today.append(candidate)
-                something_done = True
-
                 if not remaining[cls]:
                     finished.add(cls)
-
                 i += 1
                 assigned = True
+                something_done = True
                 break
 
             if not assigned:
@@ -179,72 +195,51 @@ def generate_schedule(class_subjects, start_date, holidays):
     return pd.DataFrame(schedule)
 
 # =========================================================
-# INPUT (MOBILE SAFE)
+# EXAM SETTINGS
 # =========================================================
-uploaded_file = st.file_uploader(
-    "📤 Upload filled Excel template",
-    type=["xlsx"],
-    accept_multiple_files=False
-)
+st.subheader("📅 Exam Settings")
 
-start_date = st.date_input(
-    "📅 Exam start date",
-    value=date.today()
-)
+start_date = st.date_input("Exam start date", value=date.today())
 
 holiday_dates = st.multiselect(
-    "📌 Holidays (optional)",
+    "Holidays (optional)",
     options=[start_date + timedelta(days=i) for i in range(180)],
     format_func=lambda d: d.strftime("%d-%m-%Y")
 )
 
 # =========================================================
-# RUN (MOBILE SAFE FILE HANDLING)
+# RUN
 # =========================================================
 if st.button("📅 Generate Date Sheet"):
 
-    if uploaded_file is None:
-        st.error("Please upload the filled Excel template first.")
-    else:
-        try:
-            file_bytes = uploaded_file.read()
-            df = pd.read_excel(io.BytesIO(file_bytes))
-        except Exception as e:
-            st.error("Failed to read the Excel file. Please re-upload.")
-            st.stop()
+    df = st.session_state.input_table
 
-        class_subjects = {}
-        for _, r in df.iterrows():
-            cls = str(r["Class"]).strip().lower()
-            subs = [str(s).strip() for s in r[1:] if pd.notna(s)]
+    class_subjects = {}
+    for _, r in df.iterrows():
+        if pd.isna(r["Class"]):
+            continue
+        cls = str(r["Class"]).strip().lower()
+        subs = [str(s).strip() for s in r[1:] if pd.notna(s)]
+        if subs:
             class_subjects[cls] = subs
 
-        result = generate_schedule(
-            class_subjects,
-            start_date,
-            set(holiday_dates)
-        )
+    if not class_subjects:
+        st.error("Please enter valid class and subject data.")
+        st.stop()
 
-        if result.empty:
-            st.error("❌ No valid schedule possible with given rules.")
-        else:
-            st.success("✅ Date Sheet Generated Successfully")
+    result = generate_schedule(class_subjects, start_date, set(holiday_dates))
 
-            st.info(
-                "ℹ️ The generated date sheet strictly follows the rule:\n"
-                "NO three consecutive classes have the same exam on the same day."
-            )
+    st.success("✅ Date Sheet Generated")
+    st.dataframe(result, use_container_width=True)
 
-            st.dataframe(result, use_container_width=True)
+    out = BytesIO()
+    result.to_excel(out, index=False, engine="openpyxl")
+    out.seek(0)
 
-            output = BytesIO()
-            result.to_excel(output, index=False, engine="openpyxl")
-            output.seek(0)
-
-            st.download_button(
-                "⬇️ Download Final Date Sheet",
-                data=output,
-                file_name="final_datesheet.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+    st.download_button(
+        "⬇️ Download Final Date Sheet",
+        data=out,
+        file_name="final_datesheet.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
