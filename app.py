@@ -4,14 +4,11 @@ from datetime import date, timedelta
 from io import BytesIO
 
 # =========================================================
-# PAGE CONFIG
+# CONFIG
 # =========================================================
 st.set_page_config(page_title="Smart Test Planner", layout="wide")
 st.title("📘 Smart Test Planner")
 
-# =========================================================
-# IMPORTANT RULE
-# =========================================================
 st.warning(
     "⚠️ IMPORTANT RULE\n\n"
     "The date sheet is generated STRICTLY based on the rule:\n"
@@ -21,40 +18,43 @@ st.warning(
 )
 
 # =========================================================
-# SESSION STATE INIT
+# SESSION INIT
 # =========================================================
+DEFAULT_SUBJECTS = 7
+
 if "subject_count" not in st.session_state:
-    st.session_state.subject_count = 7
+    st.session_state.subject_count = DEFAULT_SUBJECTS
 
 if "data" not in st.session_state:
-    st.session_state.data = pd.DataFrame({
-        "Class": [
-            "6", "7", "8", "9", "10",
-            "11 science", "11 commerce",
-            "12 science", "12 commerce",
-            "11 arts", "12 arts"
-        ],
-        "Subject 1": ["maths"] * 10 + ["eng", "eng"],
-        "Subject 2": ["eng"] * 10 + ["hindi/sanskrit", "hindi/sanskrit"],
-        "Subject 3": ["hindi"] * 3 + ["hindi/sanskrit"] * 2 + ["hindi/sanskrit"] * 2 + ["hindi/sanskrit"] * 2,
-        "Subject 4": ["sanskrit"] * 3 + ["science"] * 2 + ["physics", "business s", "physics", "business s", "history", "history"],
-        "Subject 5": ["science"] * 3 + ["ai"] * 2 + ["chem", "economics", "chem", "economics", "geography", "geography"],
-        "Subject 6": ["ai"] * 3 + ["sst"] * 2 + ["bio/cs", "accountancy", "bio/cs", "accountancy", "political sc", "political sc"],
-        "Subject 7": ["sst"] * 3 + [""] * 8
-    })
+    rows = [
+        ["6", "maths", "eng", "hindi", "sanskrit", "science", "ai", "sst"],
+        ["7", "maths", "eng", "hindi", "sanskrit", "science", "ai", "sst"],
+        ["8", "maths", "eng", "hindi", "sanskrit", "science", "ai", "sst"],
+        ["9", "maths", "eng", "hindi/sanskrit", "science", "ai", "sst", ""],
+        ["10", "maths", "eng", "hindi/sanskrit", "science", "ai", "sst", ""],
+        ["11 science", "maths", "eng", "hindi/sanskrit", "physics", "chem", "bio/cs", ""],
+        ["11 commerce", "maths", "eng", "hindi/sanskrit", "business s", "economics", "accountancy", ""],
+        ["12 science", "maths", "eng", "hindi/sanskrit", "physics", "chem", "bio/cs", ""],
+        ["12 commerce", "maths", "eng", "hindi/sanskrit", "business s", "economics", "accountancy", ""],
+        ["11 arts", "eng", "hindi/sanskrit", "history", "geography", "political sc", "economics", ""],
+        ["12 arts", "eng", "hindi/sanskrit", "history", "geography", "political sc", "economics", ""],
+    ]
+
+    columns = ["Class"] + [f"Subject {i}" for i in range(1, DEFAULT_SUBJECTS + 1)]
+    st.session_state.data = pd.DataFrame(rows, columns=columns)
 
 # =========================================================
 # COLUMN CONTROLS
 # =========================================================
-col1, col2 = st.columns(2)
+c1, c2 = st.columns(2)
 
-with col1:
+with c1:
     if st.button("➕ Add Subject Column"):
         st.session_state.subject_count += 1
         st.session_state.data[f"Subject {st.session_state.subject_count}"] = ""
 
-with col2:
-    if st.button("➖ Remove Last Subject Column") and st.session_state.subject_count > 1:
+with c2:
+    if st.button("➖ Remove Subject Column") and st.session_state.subject_count > 1:
         st.session_state.data.drop(
             columns=[f"Subject {st.session_state.subject_count}"],
             inplace=True
@@ -64,33 +64,30 @@ with col2:
 # =========================================================
 # ROW CONTROLS
 # =========================================================
-col3, col4 = st.columns(2)
+r1, r2 = st.columns(2)
 
-with col3:
+with r1:
     if st.button("➕ Add Class Row"):
-        empty_row = {col: "" for col in st.session_state.data.columns}
+        empty = {c: "" for c in st.session_state.data.columns}
         st.session_state.data = pd.concat(
-            [st.session_state.data, pd.DataFrame([empty_row])],
+            [st.session_state.data, pd.DataFrame([empty])],
             ignore_index=True
         )
 
-with col4:
+with r2:
     if st.button("➖ Remove Last Row") and len(st.session_state.data) > 1:
         st.session_state.data = st.session_state.data.iloc[:-1]
 
 # =========================================================
-# EDITABLE TABLE (AUTO-SAVED)
+# EDITOR (MOBILE SAFE)
 # =========================================================
-st.subheader("✏️ Edit Class & Subjects (Directly on Website)")
+st.subheader("✏️ Edit Directly (Excel-like)")
 
-edited_df = st.data_editor(
+st.session_state.data = st.data_editor(
     st.session_state.data,
-    knowing=True,
     use_container_width=True,
     num_rows="dynamic"
 )
-
-st.session_state.data = edited_df
 
 # =========================================================
 # DATE HELPERS
@@ -102,35 +99,33 @@ def is_blocked_day(d, holidays):
     return d.weekday() == 6 or is_second_saturday(d) or d in holidays
 
 # =========================================================
-# CORE SCHEDULER
+# SCHEDULER
 # =========================================================
 def generate_schedule(class_subjects, start_date, holidays):
     classes = list(class_subjects.keys())
     remaining = {c: list(class_subjects[c]) for c in classes}
     finished = set()
     schedule = []
-    current_date = start_date
+    cur = start_date
 
     while len(finished) < len(classes):
-        if is_blocked_day(current_date, holidays):
-            current_date += timedelta(days=1)
+        if is_blocked_day(cur, holidays):
+            cur += timedelta(days=1)
             continue
 
-        row = {"Date": current_date.strftime("%d-%m-%Y"), "Day": current_date.strftime("%A")}
+        row = {"Date": cur.strftime("%d-%m-%Y"), "Day": cur.strftime("%A")}
         recent = []
-        something_done = False
 
         for cls in classes:
-            if cls in finished or not remaining.get(cls):
+            if cls in finished or not remaining[cls]:
                 row[cls] = "-"
                 continue
 
-            for sub in list(remaining[cls]):
-                if sub not in recent:
-                    row[cls] = sub
-                    remaining[cls].remove(sub)
-                    recent.append(sub)
-                    something_done = True
+            for s in list(remaining[cls]):
+                if s not in recent:
+                    row[cls] = s
+                    remaining[cls].remove(s)
+                    recent.append(s)
                     break
             else:
                 row[cls] = "-"
@@ -141,23 +136,20 @@ def generate_schedule(class_subjects, start_date, holidays):
             if len(recent) > 2:
                 recent.pop(0)
 
-        if not something_done:
-            break
-
         schedule.append(row)
-        current_date += timedelta(days=1)
+        cur += timedelta(days=1)
 
     return pd.DataFrame(schedule)
 
 # =========================================================
-# GENERATE DATE SHEET
+# GENERATE
 # =========================================================
 st.subheader("📅 Generate Date Sheet")
 
 start_date = st.date_input("Exam start date", value=date.today())
-holiday_dates = st.multiselect(
+holidays = st.multiselect(
     "Holidays",
-    options=[start_date + timedelta(days=i) for i in range(180)],
+    [start_date + timedelta(days=i) for i in range(180)],
     format_func=lambda d: d.strftime("%d-%m-%Y")
 )
 
@@ -169,21 +161,16 @@ if st.button("📅 Generate Date Sheet"):
         if cls:
             class_subjects[cls] = subs
 
-    result = generate_schedule(class_subjects, start_date, set(holiday_dates))
+    result = generate_schedule(class_subjects, start_date, set(holidays))
 
-    if result.empty:
-        st.error("❌ No valid schedule possible.")
-    else:
-        st.success("✅ Date Sheet Generated")
-        st.dataframe(result, use_container_width=True)
+    st.dataframe(result, use_container_width=True)
 
-        out = BytesIO()
-        result.to_excel(out, index=False, engine="openpyxl")
-        out.seek(0)
+    out = BytesIO()
+    result.to_excel(out, index=False, engine="openpyxl")
+    out.seek(0)
 
-        st.download_button(
-            "⬇️ Download Final Date Sheet",
-            data=out,
-            file_name="final_datesheet.xlsx"
-        )
-
+    st.download_button(
+        "⬇️ Download Final Date Sheet",
+        out,
+        "final_datesheet.xlsx"
+    )
